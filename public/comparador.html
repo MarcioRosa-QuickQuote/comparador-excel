@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Comparador de Planilhas (célula por célula)</title>
+
+  <!-- SheetJS (XLSX) via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    :root{
+      --bg:#0b0f17; --card:#111827; --muted:#9ca3af; --text:#e5e7eb;
+      --line:rgba(255,255,255,.08); --accent:#60a5fa; --warn:#fbbf24; --bad:#f87171; --ok:#34d399;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; color:var(--text);
+      background:
+        radial-gradient(1100px 600px at 20% -10%, rgba(96,165,250,.20), transparent 60%),
+        radial-gradient(900px 500px at 110% 10%, rgba(248,113,113,.14), transparent 55%),
+        var(--bg);
+    }
+    header{padding:18px 18px 10px;border-bottom:1px solid rgba(255,255,255,.06)}
+    .wrap{max-width:1200px;margin:0 auto;padding:14px 18px 24px}
+    h1{margin:0;font-size:18px}
+    p{margin:6px 0 0;color:var(--muted);font-size:13px;line-height:1.35}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    @media (max-width: 900px){.grid{grid-template-columns:1fr}}
+    .card{
+      background:rgba(17,24,39,.92); border:1px solid rgba(255,255,255,.06);
+      border-radius:14px; padding:14px; box-shadow:0 10px 30px rgba(0,0,0,.25);
+    }
+    .card h2{margin:0 0 10px;font-size:14px;color:#dbeafe;font-weight:700}
+    .row{display:grid;grid-template-columns:140px 1fr;gap:10px;align-items:center;margin-bottom:10px}
+    label{color:var(--muted);font-size:13px}
+    input[type="file"], select, button, input[type="text"]{
+      width:100%; padding:10px; border-radius:10px; border:1px solid rgba(255,255,255,.10);
+      background:rgba(10,15,25,.7); color:var(--text); outline:none;
+    }
+    .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+    button{cursor:pointer;font-weight:800;border:1px solid rgba(96,165,250,.35);background:rgba(96,165,250,.15)}
+    button:hover{background:rgba(96,165,250,.22)}
+    .btn-secondary{border-color:rgba(156,163,175,.25);background:rgba(156,163,175,.10)}
+    .btn-secondary:hover{background:rgba(156,163,175,.16)}
+    .note{color:var(--muted);font-size:12px;line-height:1.45;margin-top:6px}
+    .divider{height:1px;background:rgba(255,255,255,.06);margin:12px 0}
+
+    .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+    @media (max-width:900px){.kpis{grid-template-columns:1fr}}
+    .kpi{padding:10px;border-radius:12px;border:1px solid rgba(255,255,255,.06);background:rgba(17,24,39,.75)}
+    .kpi .t{color:var(--muted);font-size:12px}
+    .kpi .v{font-size:18px;font-weight:900;margin-top:4px}
+
+    .tabs{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 12px}
+    .tab{
+      padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,.08);
+      background:rgba(17,24,39,.55);cursor:pointer;font-weight:800;font-size:13px
+    }
+    .tab.active{border-color:rgba(96,165,250,.4);background:rgba(96,165,250,.14);color:#dbeafe}
+    .panel{display:none}
+    .panel.active{display:block}
+
+    .topbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+    .topbar > *{flex:1;min-width:220px}
+
+    .tablewrap{
+      border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:auto;
+      background:rgba(17,24,39,.6);max-height:520px;
+    }
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    thead th{
+      position:sticky;top:0;background:rgba(15,23,42,.95);color:#dbeafe;
+      text-align:left;padding:10px;border-bottom:1px solid rgba(255,255,255,.08);white-space:nowrap
+    }
+    tbody td{padding:9px 10px;border-bottom:1px solid rgba(255,255,255,.06);vertical-align:top;word-break:break-word}
+    tbody tr:hover{background:rgba(255,255,255,.03)}
+    .cell-diff{outline:2px solid rgba(248,113,113,.7); outline-offset:-2px; background:rgba(248,113,113,.08)}
+  </style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>Comparador de planilhas — célula por célula (sem coluna-chave)</h1>
+    <p>
+      O app compara <b>pela posição</b>: A1 vs A1, A2 vs A2… e lista só as células diferentes.
+      Você também pode ver uma prévia com as células destacadas.
+    </p>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="grid">
+    <div class="card">
+      <h2>1) Carregar arquivos</h2>
+
+      <div class="row">
+        <label>Planilha A</label>
+        <input id="fileA" type="file" accept=".xlsx,.xls,.csv" />
+      </div>
+      <div class="row">
+        <label>Aba (A)</label>
+        <select id="sheetA" disabled></select>
+      </div>
+
+      <div class="row">
+        <label>Planilha B</label>
+        <input id="fileB" type="file" accept=".xlsx,.xls,.csv" />
+      </div>
+      <div class="row">
+        <label>Aba (B)</label>
+        <select id="sheetB" disabled></select>
+      </div>
+
+      <div class="divider"></div>
+
+      <h2>2) Regras</h2>
+      <div class="row">
+        <label>Normalização</label>
+        <select id="normalize">
+          <option value="trimLower">Remover espaços + ignorar maiúsc/minúsc</option>
+          <option value="trimOnly">Remover espaços (mantém maiúsc/minúsc)</option>
+          <option value="raw">Comparar “cru” (sem mexer)</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label>Cabeçalho?</label>
+        <select id="headerMode">
+          <option value="auto">Automático (tenta usar 1ª linha como cabeçalho)</option>
+          <option value="yes">Sim (1ª linha é cabeçalho)</option>
+          <option value="no">Não (tudo é dado)</option>
+        </select>
+      </div>
+
+      <div class="actions">
+        <button id="btnCompare" disabled>Comparar células</button>
+        <button class="btn-secondary" id="btnClear">Limpar</button>
+      </div>
+
+      <div class="note" id="status">Carregue as duas planilhas.</div>
+      <div class="note"><b>Observação:</b> sem chave, a comparação é por posição. Se uma planilha tiver linhas inseridas no meio, vai “desalinhar” e aparecer muita diferença (o que é esperado).</div>
+    </div>
+
+    <div class="card">
+      <h2>Resumo</h2>
+      <div class="kpis">
+        <div class="kpi"><div class="t">Dimensão A (linhas × colunas)</div><div class="v" id="kDimA">0 × 0</div></div>
+        <div class="kpi"><div class="t">Dimensão B (linhas × colunas)</div><div class="v" id="kDimB">0 × 0</div></div>
+        <div class="kpi"><div class="t">Células diferentes</div><div class="v" id="kDiff">0</div></div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="note">
+        Você terá 2 visões:
+        <ul style="margin:8px 0 0; padding-left:18px;">
+          <li><b>Lista de diferenças</b>: endereço da célula + valor A vs B.</li>
+          <li><b>Prévia</b>: tabela com células diferentes destacadas.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:12px;">
+    <h2>Resultados</h2>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="diff">Lista de diferenças</div>
+      <div class="tab" data-tab="prevA">Prévia A (destacado)</div>
+      <div class="tab" data-tab="prevB">Prévia B (destacado)</div>
+    </div>
+
+    <div class="topbar">
+      <input id="filter" type="text" placeholder="Filtrar (ex.: C12, nome da coluna, valor...)" />
+      <button class="btn-secondary" id="btnDownload">Baixar CSV (diferenças)</button>
+    </div>
+
+    <div id="panel-diff" class="panel active">
+      <div class="note">Cada linha abaixo é uma célula diferente.</div>
+      <div class="tablewrap"><table id="tblDiff"></table></div>
+    </div>
+
+    <div id="panel-prevA" class="panel">
+      <div class="note">Prévia da planilha A. Células diferentes ficam destacadas.</div>
+      <div class="tablewrap"><table id="tblPrevA"></table></div>
+    </div>
+
+    <div id="panel-prevB" class="panel">
+      <div class="note">Prévia da planilha B. Células diferentes ficam destacadas.</div>
+      <div class="tablewrap"><table id="tblPrevB"></table></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ---------- Estado ----------
+  let wbA=null, wbB=null;
+  let gridA=[], gridB=[];       // matrizes 2D de valores (strings)
+  let headerA=[], headerB=[];   // nomes das colunas (se houver)
+  let diffs=[];                 // lista {addr, r, c, colName, a, b}
+
+  const $ = (id)=>document.getElementById(id);
+
+  function setStatus(msg){ $("status").textContent = msg; }
+
+  function normalizeValue(v, mode){
+    if (v === null || v === undefined) return "";
+    let s = String(v);
+    if (mode === "raw") return s;
+    s = s.trim();
+    if (mode === "trimLower") s = s.toLowerCase();
+    return s;
+  }
+
+  function readFileAsArrayBuffer(file){
+    return new Promise((resolve,reject)=>{
+      const r = new FileReader();
+      r.onload = ()=>resolve(r.result);
+      r.onerror = reject;
+      r.readAsArrayBuffer(file);
+    });
+  }
+
+  async function loadWorkbook(file){
+    const buf = await readFileAsArrayBuffer(file);
+    return XLSX.read(buf, { type:"array" });
+  }
+
+  function fillSelect(selectEl, items){
+    selectEl.innerHTML = "";
+    items.forEach((it, idx)=>{
+      const opt = document.createElement("option");
+      opt.value = it;
+      opt.textContent = it;
+      if(idx===0) opt.selected = true;
+      selectEl.appendChild(opt);
+    });
+    selectEl.disabled = items.length === 0;
+  }
+
+  // Converte sheet para matriz 2D (valores) usando SheetJS
+  function sheetToMatrix(workbook, sheetName){
+    const ws = workbook.Sheets[sheetName];
+    // header:1 => retorna matriz de arrays (linhas), preserva posições
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+    return aoa.map(row => row.map(cell => cell === undefined ? "" : cell));
+  }
+
+  function detectHeader(aoa){
+    // heurística simples: se 1ª linha tem maioria de strings não-vazias => cabeçalho
+    if (!aoa.length) return false;
+    const row0 = aoa[0] || [];
+    let nonEmpty = 0, stringy = 0;
+    for (const v of row0){
+      const s = String(v ?? "").trim();
+      if (s !== "") { nonEmpty++; if (isNaN(Number(s))) stringy++; }
+    }
+    if (nonEmpty === 0) return false;
+    return (stringy / nonEmpty) >= 0.6;
+  }
+
+  function splitHeaderAndData(aoa, headerMode){
+    let hasHeader = false;
+    if (headerMode === "yes") hasHeader = true;
+    else if (headerMode === "no") hasHeader = false;
+    else hasHeader = detectHeader(aoa);
+
+    let header = [];
+    let data = aoa;
+
+    if (hasHeader && aoa.length){
+      header = (aoa[0] || []).map((v, idx)=>{
+        const name = String(v ?? "").trim();
+        return name !== "" ? name : `Coluna ${idx+1}`;
+      });
+      data = aoa.slice(1);
+    } else {
+      const maxCols = aoa.reduce((m,r)=>Math.max(m, r.length), 0);
+      header = Array.from({length:maxCols}, (_,i)=>`Coluna ${i+1}`);
+      data = aoa;
+    }
+
+    // padroniza retângulo
+    const cols = Math.max(header.length, data.reduce((m,r)=>Math.max(m, r.length), 0));
+    const normHeader = header.concat(Array.from({length: Math.max(0, cols-header.length)}, (_,i)=>`Coluna ${header.length+i+1}`));
+    const normData = data.map(r => {
+      const rr = r.slice();
+      while (rr.length < cols) rr.push("");
+      return rr;
+    });
+
+    return { header: normHeader, data: normData };
+  }
+
+  function cellAddress(r, c){
+    // r,c 0-based para r,c 1-based no Excel
+    return XLSX.utils.encode_cell({ r: r, c: c });
+  }
+
+  function enableCompareIfReady(){
+    $("btnCompare").disabled = !(wbA && wbB);
+  }
+
+  // ---------- Render ----------
+  function renderDiffTable(rows){
+    const tbl = $("tblDiff");
+    tbl.innerHTML = "";
+    const thead = document.createElement("thead");
+    const trh = document.createElement("tr");
+    ["Célula","Linha","Coluna","Nome da coluna","Valor em A","Valor em B"].forEach(h=>{
+      const th = document.createElement("th"); th.textContent = h; trh.appendChild(th);
+    });
+    thead.appendChild(trh);
+    tbl.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+    for (const r of rows){
+      const tr = document.createElement("tr");
+      const vals = [
+        r.addr,
+        String(r.r+1),
+        String(r.c+1),
+        r.colName,
+        r.a,
+        r.b
+      ];
+      vals.forEach(v=>{
+        const td=document.createElement("td"); td.textContent = v; tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    }
+    tbl.appendChild(tbody);
+  }
+
+  function renderPreview(tableId, header, data, diffSet){
+    const tbl = $(tableId);
+    tbl.innerHTML = "";
+
+    const thead = document.createElement("thead");
+    const trh = document.createElement("tr");
+
+    // Coluna auxiliar com número da linha (mais didático)
+    const th0 = document.createElement("th"); th0.textContent = "#"; trh.appendChild(th0);
+
+    header.forEach(h=>{
+      const th = document.createElement("th"); th.textContent = h; trh.appendChild(th);
+    });
+    thead.appendChild(trh);
+    tbl.appendChild(thead);
+
+    const tbody = document.createElement("tbody");
+
+    // Limita preview para não travar: 200 linhas
+    const maxRows = Math.min(200, data.length);
+
+    for (let r=0; r<maxRows; r++){
+      const tr = document.createElement("tr");
+
+      const tdIdx = document.createElement("td");
+      tdIdx.textContent = String(r+1);
+      tdIdx.style.color = "rgba(156,163,175,.9)";
+      tr.appendChild(tdIdx);
+
+      for (let c=0; c<header.length; c++){
+        const td = document.createElement("td");
+        const v = (data[r] && data[r][c] !== undefined) ? String(data[r][c]) : "";
+        td.textContent = v;
+
+        const key = `${r}:${c}`;
+        if (diffSet.has(key)) td.classList.add("cell-diff");
+
+        tr.appendChild(td);
+      }
+      tbody.appendChild(tr);
+    }
+    tbl.appendChild(tbody);
+  }
+
+  function downloadCsvDiffs(rows){
+    const header = ["Celula","Linha","Coluna","NomeColuna","ValorA","ValorB"];
+    const lines = [header.join(",")];
+
+    for (const r of rows){
+      const esc = (s)=> `"${String(s ?? "").replace(/"/g,'""')}"`;
+      lines.push([
+        esc(r.addr),
+        esc(r.r+1),
+        esc(r.c+1),
+        esc(r.colName),
+        esc(r.a),
+        esc(r.b)
+      ].join(","));
+    }
+
+    const blob = new Blob([lines.join("\n")], { type:"text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "diferencas.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  // ---------- Lógica de comparação (célula por célula) ----------
+  function compareCells(){
+    const normMode = $("normalize").value;
+    const headerMode = $("headerMode").value;
+
+    const aoaA = sheetToMatrix(wbA, $("sheetA").value);
+    const aoaB = sheetToMatrix(wbB, $("sheetB").value);
+
+    const splitA = splitHeaderAndData(aoaA, headerMode);
+    const splitB = splitHeaderAndData(aoaB, headerMode);
+
+    headerA = splitA.header;
+    headerB = splitB.header;
+
+    // Dimensão final: maior retângulo possível
+    const rows = Math.max(splitA.data.length, splitB.data.length);
+    const cols = Math.max(splitA.header.length, splitB.header.length);
+
+    // Padroniza headers para mesma largura
+    const header = Array.from({length: cols}, (_,i)=>{
+      // prefere o nome de A, senão de B, senão Coluna i
+      const hA = splitA.header[i];
+      const hB = splitB.header[i];
+      return (hA && String(hA).trim() !== "") ? hA : ((hB && String(hB).trim() !== "") ? hB : `Coluna ${i+1}`);
+    });
+
+    // Padroniza data para mesmo retângulo
+    gridA = Array.from({length: rows}, (_,r)=>{
+      const row = splitA.data[r] ? splitA.data[r].slice() : [];
+      while (row.length < cols) row.push("");
+      return row;
+    });
+
+    gridB = Array.from({length: rows}, (_,r)=>{
+      const row = splitB.data[r] ? splitB.data[r].slice() : [];
+      while (row.length < cols) row.push("");
+      return row;
+    });
+
+    // Compara célula por célula
+    diffs = [];
+    const diffSet = new Set(); // para pintar no preview
+
+    for (let r=0; r<rows; r++){
+      for (let c=0; c<cols; c++){
+        const aRaw = gridA[r][c];
+        const bRaw = gridB[r][c];
+
+        const aNorm = normalizeValue(aRaw, normMode);
+        const bNorm = normalizeValue(bRaw, normMode);
+
+        if (aNorm !== bNorm){
+          const addr = cellAddress(r + 1, c); // +1 porque 0 é cabeçalho no arquivo original se existia; aqui endereçamos dados começando em linha 2 do Excel quando há cabeçalho
+          // Mas para ficar didático, mostramos “linha de dados” (r+1). No CSV fica claro com linha/coluna.
+          diffs.push({
+            addr: XLSX.utils.encode_cell({r: r+1, c}), // linha 2 em diante (quando tem cabeçalho). Se não tiver, continua ok (apenas convenção)
+            r, c,
+            colName: header[c] || `Coluna ${c+1}`,
+            a: String(aRaw ?? ""),
+            b: String(bRaw ?? "")
+          });
+          diffSet.add(`${r}:${c}`);
+        }
+      }
+    }
+
+    // KPIs
+    $("kDimA").textContent = `${splitA.data.length} × ${splitA.header.length}`;
+    $("kDimB").textContent = `${splitB.data.length} × ${splitB.header.length}`;
+    $("kDiff").textContent = String(diffs.length);
+
+    // Render
+    renderDiffTable(diffs);
+    renderPreview("tblPrevA", header, gridA, diffSet);
+    renderPreview("tblPrevB", header, gridB, diffSet);
+
+    setStatus(`Comparação concluída. Encontradas ${diffs.length} células diferentes.`);
+  }
+
+  // ---------- Eventos UI ----------
+  function setupTabs(){
+    document.querySelectorAll(".tab").forEach(tab=>{
+      tab.addEventListener("click", ()=>{
+        document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+        tab.classList.add("active");
+        const name = tab.dataset.tab;
+
+        document.querySelectorAll(".panel").forEach(p=>p.classList.remove("active"));
+        $("panel-" + name).classList.add("active");
+      });
+    });
+  }
+
+  function applyFilter(){
+    const q = $("filter").value.trim().toLowerCase();
+    if (!q){
+      renderDiffTable(diffs);
+      return;
+    }
+    const filtered = diffs.filter(r=>{
+      const blob = `${r.addr} ${r.r+1} ${r.c+1} ${r.colName} ${r.a} ${r.b}`.toLowerCase();
+      return blob.includes(q);
+    });
+    renderDiffTable(filtered);
+  }
+
+  async function onFileChange(which){
+    const file = which === "A" ? $("fileA").files[0] : $("fileB").files[0];
+    if (!file) return;
+
+    try{
+      setStatus(`Lendo Planilha ${which}...`);
+      const wb = await loadWorkbook(file);
+      if (which === "A") wbA = wb; else wbB = wb;
+
+      const sheetNames = wb.SheetNames || [];
+      fillSelect(which==="A" ? $("sheetA") : $("sheetB"), sheetNames);
+      setStatus(`Planilha ${which} carregada. Escolha a aba (ou deixe a primeira).`);
+
+      enableCompareIfReady();
+    }catch(e){
+      console.error(e);
+      setStatus(`Erro ao carregar Planilha ${which}.`);
+    }
+  }
+
+  function clearAll(){
+    wbA=wbB=null;
+    gridA=[]; gridB=[]; headerA=[]; headerB=[]; diffs=[];
+    $("fileA").value=""; $("fileB").value="";
+    $("sheetA").innerHTML=""; $("sheetB").innerHTML="";
+    $("sheetA").disabled=true; $("sheetB").disabled=true;
+    $("btnCompare").disabled=true;
+    $("tblDiff").innerHTML=""; $("tblPrevA").innerHTML=""; $("tblPrevB").innerHTML="";
+    $("kDimA").textContent="0 × 0"; $("kDimB").textContent="0 × 0"; $("kDiff").textContent="0";
+    $("filter").value="";
+    setStatus("Carregue as duas planilhas.");
+  }
+
+  // ---------- Init ----------
+  setupTabs();
+
+  $("fileA").addEventListener("change", ()=>onFileChange("A"));
+  $("fileB").addEventListener("change", ()=>onFileChange("B"));
+
+  $("btnCompare").addEventListener("click", compareCells);
+  $("btnClear").addEventListener("click", clearAll);
+
+  $("filter").addEventListener("input", applyFilter);
+
+  $("btnDownload").addEventListener("click", ()=>{
+    // baixa o que está filtrado na tabela atual (se tiver filtro aplicado)
+    const q = $("filter").value.trim().toLowerCase();
+    const rows = !q ? diffs : diffs.filter(r=>{
+      const blob = `${r.addr} ${r.r+1} ${r.c+1} ${r.colName} ${r.a} ${r.b}`.toLowerCase();
+      return blob.includes(q);
+    });
+    downloadCsvDiffs(rows);
+  });
+</script>
+</body>
+</html>
